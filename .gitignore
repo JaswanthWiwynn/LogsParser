@@ -1,6 +1,5 @@
 node_modules
 dist
-.env
 *.local
 .cursor/rules/apple-design.mdc
 .neon

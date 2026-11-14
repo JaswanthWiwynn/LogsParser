@@ -1,13 +1,8 @@
-import dotenv from 'dotenv'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import http from 'node:http'
 import https from 'node:https'
-import { ensureSchema, insertParseRun, listParseRuns, pingDatabase } from './src/server/db.js'
-
-dotenv.config({ path: '.env.local' })
-dotenv.config()
 
 const MAX_LOG_BYTES = 8 * 1024 * 1024
 
@@ -88,72 +83,15 @@ function fetchLogText(target, redirects = 0) {
   })
 }
 
-function sendJson(res, status, body) {
-  res.statusCode = status
-  res.setHeader('Content-Type', 'application/json; charset=utf-8')
-  res.end(JSON.stringify(body))
-}
-
-function apiPlugin() {
+function logFetchPlugin() {
   return {
-    name: 'logs-parser-api',
+    name: 'log-fetch',
     configureServer(server) {
-      let schemaReady = Promise.resolve()
-      try {
-        schemaReady = ensureSchema()
-      } catch (error) {
-        schemaReady = Promise.reject(error)
-      }
-
-      server.middlewares.use('/api/health', async (req, res) => {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { error: 'Use GET' })
-          return
-        }
-        try {
-          await schemaReady
-          const ping = await pingDatabase()
-          sendJson(res, 200, {
-            ok: true,
-            postgres: ping,
-            branch: process.env.NEON_BRANCH || null,
-          })
-        } catch (error) {
-          sendJson(res, 500, { ok: false, error: error.message || 'Database health check failed' })
-        }
-      })
-
-      server.middlewares.use('/api/runs', async (req, res) => {
-        try {
-          await schemaReady
-          if (req.method === 'GET') {
-            const runs = await listParseRuns(20)
-            sendJson(res, 200, { runs })
-            return
-          }
-          if (req.method === 'POST') {
-            const body = JSON.parse((await readRequestBody(req)) || '{}')
-            const sourceFile = String(body.sourceFile || '').trim()
-            if (!sourceFile) throw new Error('Missing sourceFile')
-            const run = await insertParseRun({
-              sourceFile,
-              totalRows: Number(body.totalRows) || 0,
-              failedRows: Number(body.failedRows) || 0,
-              retrievedOk: Number(body.retrievedOk) || 0,
-              retrievedError: Number(body.retrievedError) || 0,
-            })
-            sendJson(res, 201, { run })
-            return
-          }
-          sendJson(res, 405, { error: 'Use GET or POST' })
-        } catch (error) {
-          sendJson(res, 400, { error: error.message || 'Runs API failed' })
-        }
-      })
-
       server.middlewares.use('/api/fetch-log', async (req, res) => {
         if (req.method !== 'POST') {
-          sendJson(res, 405, { error: 'Use POST' })
+          res.statusCode = 405
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: 'Use POST' }))
           return
         }
 
@@ -162,9 +100,13 @@ function apiPlugin() {
           const url = String(body.url || '').trim()
           if (!url) throw new Error('Missing error link')
           const text = await fetchLogText(url)
-          sendJson(res, 200, { text })
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ text }))
         } catch (error) {
-          sendJson(res, 400, { error: error.message || 'Could not fetch log' })
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ error: error.message || 'Could not fetch log' }))
         }
       })
     },
@@ -173,7 +115,7 @@ function apiPlugin() {
 
 export default defineConfig({
   base: '/LogsParser/',
-  plugins: [react(), tailwindcss(), apiPlugin()],
+  plugins: [react(), tailwindcss(), logFetchPlugin()],
   server: {
     host: '127.0.0.1',
     port: 5173,
