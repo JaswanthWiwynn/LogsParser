@@ -78,7 +78,7 @@ export default function App() {
           } catch (fetchError) {
             ok = false
             const detail = fetchError.message === 'Failed to fetch'
-              ? 'The page could not reach the local app. Leave `npm run dev` running, open http://127.0.0.1:5173/, refresh, and upload again.'
+              ? 'Could not reach /api/fetch-log. Use the Vercel URL or run `npm run dev` locally.'
               : fetchError.message
             content = `ERROR RETRIEVING LOG:\n${detail}`
           }
