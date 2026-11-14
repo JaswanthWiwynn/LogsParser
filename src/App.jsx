@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AppNav from './components/AppNav'
 import { formatLogs } from './lib/formatLogs'
 import { parseSpreadsheet } from './lib/parseSheet'
@@ -14,6 +14,28 @@ async function fetchLogText(url) {
     throw new Error(payload.error || `Could not fetch log (${response.status})`)
   }
   return payload.text ?? ''
+}
+
+async function saveParseRun(run) {
+  const response = await fetch('/api/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(run),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload.error || `Could not save run (${response.status})`)
+  }
+  return payload.run
+}
+
+async function loadRecentRuns() {
+  const response = await fetch('/api/runs')
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload.error || `Could not load runs (${response.status})`)
+  }
+  return payload.runs || []
 }
 
 function downloadText(fileName, text) {
@@ -39,6 +61,27 @@ export default function App() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [dbStatus, setDbStatus] = useState('checking')
+  const [recentRuns, setRecentRuns] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const health = await fetch('/api/health').then((r) => r.json())
+        if (cancelled) return
+        if (!health.ok) throw new Error(health.error || 'Database unavailable')
+        setDbStatus(health.branch ? `connected (${health.branch})` : 'connected')
+        const runs = await loadRecentRuns()
+        if (!cancelled) setRecentRuns(runs)
+      } catch (err) {
+        if (!cancelled) setDbStatus(`offline: ${err.message}`)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleFile(file) {
     if (!file || busy) return
@@ -90,6 +133,21 @@ export default function App() {
 
       setLogText(formatLogs(file.name, collected))
       setProgress(null)
+
+      const retrievedOk = collected.filter((entry) => entry.ok).length
+      try {
+        await saveParseRun({
+          sourceFile: file.name,
+          totalRows: parsed.total,
+          failedRows: parsed.failed.length,
+          retrievedOk,
+          retrievedError: collected.length - retrievedOk,
+        })
+        const runs = await loadRecentRuns()
+        setRecentRuns(runs)
+      } catch (saveError) {
+        setError(`Logs ready, but Neon save failed: ${saveError.message}`)
+      }
     } catch (parseError) {
       setProgress(null)
       setError(parseError.message || 'Could not read that spreadsheet.')
@@ -172,6 +230,21 @@ export default function App() {
           <p role="alert" className="alert rise">
             {error}
           </p>
+        ) : null}
+
+        <p className="text-[14px] text-muted">Neon Postgres: {dbStatus}</p>
+
+        {recentRuns.length ? (
+          <section className="panel rise px-5 py-4 sm:px-6">
+            <h2 className="text-[17px] font-semibold tracking-tight">Recent runs</h2>
+            <ul className="mt-3 space-y-2 font-mono text-[13px] text-muted">
+              {recentRuns.slice(0, 5).map((run) => (
+                <li key={run.id} className="break-all">
+                  #{run.id} {run.source_file} — {run.failed_rows} failed, {run.retrieved_ok} ok
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {summary ? (
