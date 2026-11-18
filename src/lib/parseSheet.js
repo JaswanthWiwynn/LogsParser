@@ -6,6 +6,13 @@ function normalize(value) {
   return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
 
+function classifyResult(result) {
+  const value = result.toLowerCase()
+  if (value === 'failed') return 'failed'
+  if (value === 'pass' || value === 'passed') return 'pass'
+  return null
+}
+
 export function parseSpreadsheet(buffer) {
   const workbook = XLSX.read(buffer, { type: 'array' })
   const sheetName = workbook.SheetNames[0]
@@ -28,19 +35,29 @@ export function parseSpreadsheet(buffer) {
     throw new Error(`Missing column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}.`)
   }
 
-  const parsed = rows.map((row, index) => ({
-    rowNumber: index + 2,
-    result: String(row[headerMap.get('result')] ?? '').trim(),
-    errorlink: String(row[headerMap.get('errorlink')] ?? '').trim(),
-    serialNum: String(row[headerMap.get('serial_num')] ?? '').trim(),
-    testCase: headerMap.has('test_case_name')
-      ? String(row[headerMap.get('test_case_name')] ?? '').trim()
-      : '',
-  }))
+  const parsed = rows.map((row, index) => {
+    const result = String(row[headerMap.get('result')] ?? '').trim()
+    return {
+      rowNumber: index + 2,
+      result,
+      outcome: classifyResult(result),
+      errorlink: String(row[headerMap.get('errorlink')] ?? '').trim(),
+      serialNum: String(row[headerMap.get('serial_num')] ?? '').trim(),
+      testCase: headerMap.has('test_case_name')
+        ? String(row[headerMap.get('test_case_name')] ?? '').trim()
+        : '',
+    }
+  })
+
+  const selected = parsed.filter((row) => row.outcome === 'failed' || row.outcome === 'pass')
+  const failed = selected.filter((row) => row.outcome === 'failed')
+  const passed = selected.filter((row) => row.outcome === 'pass')
 
   return {
     sheetName,
     total: parsed.length,
-    failed: parsed.filter((row) => row.result.toLowerCase() === 'failed'),
+    selected,
+    failed,
+    passed,
   }
 }

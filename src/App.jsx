@@ -20,9 +20,9 @@ function downloadText(fileName, text) {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const base = fileName.replace(/\.[^.]+$/, '') || 'failed_logs'
+  const base = fileName.replace(/\.[^.]+$/, '') || 'logs'
   link.href = url
-  link.download = `${base}_failed_logs.txt`
+  link.download = `${base}_logs.txt`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -54,18 +54,23 @@ export default function App() {
     try {
       const buffer = await file.arrayBuffer()
       const parsed = parseSpreadsheet(buffer)
-      setSummary({ total: parsed.total, failed: parsed.failed.length, sheetName: parsed.sheetName })
+      setSummary({
+        total: parsed.total,
+        failed: parsed.failed.length,
+        passed: parsed.passed.length,
+        sheetName: parsed.sheetName,
+      })
 
-      if (!parsed.failed.length) {
+      if (!parsed.selected.length) {
         setProgress(null)
-        setError('No rows with result = failed were found.')
+        setError('No rows with result = failed or pass were found.')
         return
       }
 
       const collected = []
-      for (let index = 0; index < parsed.failed.length; index += 1) {
-        const row = parsed.failed[index]
-        setProgress({ current: index + 1, total: parsed.failed.length, serial: row.serialNum })
+      for (let index = 0; index < parsed.selected.length; index += 1) {
+        const row = parsed.selected[index]
+        setProgress({ current: index + 1, total: parsed.selected.length, serial: row.serialNum })
 
         let content = ''
         let ok = true
@@ -114,8 +119,8 @@ export default function App() {
           <div>
             <h1 className="display mt-3">Logs Parser</h1>
             <p className="lede mt-4 sm:mt-5">
-              Upload an Excel or CSV export. Rows where result is failed are opened from the errorlink
-              column, then packed into one downloadable text file.
+              Upload an Excel or CSV export. Rows where result is failed or pass are opened from the
+              errorlink column, then packed into one downloadable text file.
             </p>
           </div>
           <button type="button" onClick={openPicker} disabled={busy} className="btn btn-primary w-full shrink-0 md:w-auto">
@@ -175,9 +180,10 @@ export default function App() {
         ) : null}
 
         {summary ? (
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Rows in sheet" value={summary.total} />
-            <Stat label="Failed rows" value={summary.failed} />
+            <Stat label="Failed" value={summary.failed} />
+            <Stat label="Passed" value={summary.passed} />
             <Stat label="Logs retrieved" value={entries.length ? `${fetchedCount} ok / ${failedFetches} errors` : '—'} />
           </section>
         ) : null}
@@ -199,7 +205,7 @@ export default function App() {
         {entries.length ? (
           <section className="panel rise">
             <div className="flex flex-col gap-3 border-b border-black/6 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <h2 className="text-[17px] font-semibold tracking-tight">Failed rows</h2>
+              <h2 className="text-[17px] font-semibold tracking-tight">Parsed rows</h2>
               <button
                 type="button"
                 disabled={!logText}
@@ -218,7 +224,10 @@ export default function App() {
                       <p className="font-mono text-[15px] break-all">{entry.serialNum || '—'}</p>
                       <p className="mt-1 text-[15px] text-muted break-words">{entry.testCase || '—'}</p>
                     </div>
-                    <Status ok={entry.ok} />
+                    <div className="flex flex-wrap gap-2">
+                      <ResultChip outcome={entry.outcome} />
+                      <Status ok={entry.ok} />
+                    </div>
                   </div>
                   <p className="mt-2 text-[13px] text-faint">Row {index + 1}</p>
                 </li>
@@ -232,7 +241,8 @@ export default function App() {
                     <th>#</th>
                     <th>Serial</th>
                     <th>Test</th>
-                    <th>Status</th>
+                    <th>Result</th>
+                    <th>Fetch</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -241,6 +251,9 @@ export default function App() {
                       <td className="font-mono text-muted">{index + 1}</td>
                       <td className="font-mono whitespace-nowrap">{entry.serialNum || '—'}</td>
                       <td className="max-w-xs">{entry.testCase || '—'}</td>
+                      <td>
+                        <ResultChip outcome={entry.outcome} />
+                      </td>
                       <td>
                         <Status ok={entry.ok} />
                       </td>
@@ -269,6 +282,15 @@ function Stat({ label, value }) {
       <p className="stat-label">{label}</p>
       <p className="stat-value">{value}</p>
     </div>
+  )
+}
+
+function ResultChip({ outcome }) {
+  const isPass = outcome === 'pass'
+  return (
+    <span className={`${isPass ? 'chip chip-ok' : 'chip chip-warn'} shrink-0`}>
+      {isPass ? 'Pass' : 'Failed'}
+    </span>
   )
 }
 
